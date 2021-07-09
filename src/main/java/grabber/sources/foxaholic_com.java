@@ -15,14 +15,35 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 public class foxaholic_com implements Source {
-    private final Novel novel;
+    private final String name = "Foxaholic";
+    private final String url = "https://foxaholic.com";
+    private final boolean canHeadless = false;
+    private Novel novel;
     private Document toc;
 
     public foxaholic_com(Novel novel) {
         this.novel = novel;
+    }
+
+    public foxaholic_com() {
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public boolean canHeadless() {
+        return canHeadless;
+    }
+
+    public String toString() {
+        return name;
+    }
+
+    public String getUrl() {
+        return url;
     }
 
     public List<Chapter> getChapterList() {
@@ -30,6 +51,7 @@ public class foxaholic_com implements Source {
         try {
             toc = Jsoup.connect(novel.novelLink).get();
             Connection.Response res = Jsoup.connect("https://foxaholic.com/wp-admin/admin-ajax.php")
+                    .cookies(novel.cookies)
                     .method(Connection.Method.POST)
                     .referrer("novel.novelLink")
                     .data("action", "manga_get_chapters")
@@ -45,6 +67,8 @@ public class foxaholic_com implements Source {
             GrabberUtils.err(novel.window, GrabberUtils.getHTMLErrMsg(httpEr));
         } catch (IOException e) {
             GrabberUtils.err(novel.window, "Could not connect to webpage!", e);
+        } catch (NullPointerException e) {
+            GrabberUtils.err(novel.window, "Could not find expected selectors. Correct novel link?", e);
         }
         return chapterList;
     }
@@ -66,10 +90,15 @@ public class foxaholic_com implements Source {
         NovelMetadata metadata = new NovelMetadata();
 
         if (toc != null) {
-            metadata.setTitle(toc.select("title").first().text().replace(" – Foxaholic", ""));
-            metadata.setAuthor(toc.select(".author-content a").first().text());
-            metadata.setDescription(toc.select(".summary__content").first().text());
-            metadata.setBufferedCover(toc.select(".summary_image img").attr("abs:data-src"));
+            Element title = toc.selectFirst(".breadcrumb > :last-child");
+            Element author = toc.selectFirst(".author-content a");
+            Element desc = toc.selectFirst(".summary__content");
+            Element cover = toc.selectFirst(".summary_image img");
+
+            metadata.setTitle(title != null ? title.text() : "");
+            metadata.setAuthor(author != null ? author.text() : "");
+            metadata.setDescription(desc != null ? desc.text() : "");
+            metadata.setBufferedCover(cover != null ? cover.attr("abs:data-src") : "");
 
             Elements tags = toc.select(".genres-content a");
             List<String> subjects = new ArrayList<>();
@@ -90,10 +119,6 @@ public class foxaholic_com implements Source {
         blacklistedTags.add("meta");
         blacklistedTags.add("center");
         return blacklistedTags;
-    }
-
-    public Map<String, String> getLoginCookies() throws UnsupportedOperationException {
-        throw new UnsupportedOperationException();
     }
 
 }

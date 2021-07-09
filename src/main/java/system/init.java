@@ -1,12 +1,17 @@
 package system;
+
+import bots.telegram.Bot;
+import com.formdev.flatlaf.FlatDarculaLaf;
+import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatIntelliJLaf;
+import com.formdev.flatlaf.FlatLightLaf;
 import grabber.*;
 import gui.GUI;
-import system.bots.Telegram;
-import system.library.LibrarySystem;
+import library.Library;
 
 import javax.swing.*;
 import java.awt.*;
+import java.io.IOException;
 import java.util.*;
 import java.util.List;
 
@@ -14,13 +19,14 @@ import java.util.List;
  * Initially called class.
  * Handles cli input.
  * Creates GUI instance.
- * Creates LibrarySystem instance.
+ * Creates Library instance.
  */
 public class init {
-    public static final String versionNumber = "3.3.1";
+    public static final String versionNumber = "3.9.5";
+    public static final Library library = Library.getInstance();;
+    public static final Config config = Config.getInstance();
     public static GUI gui;
-    public static LibrarySystem librarySystem;
-    public static Telegram telegramBot;
+    public static Bot telegramBot;
 
     public static void main(String[] args) {
         final Map<String, List<String>> params = CLI.createParamsFromArgs(args);
@@ -32,22 +38,41 @@ public class init {
      */
     public static void processParams(Map<String, List<String>> params) {
         if(params.containsKey("gui") || params.isEmpty()) {
-            startGUI();
-            librarySystem = new LibrarySystem();
+            if (!GraphicsEnvironment.isHeadless()) {
+                startGUI();
+                if(config.isPollingEnabled()) {
+                    library.startPolling();
+                }
+            } else {
+                printHelp();
+            }
         }
         else if(params.containsKey("help")) {
             printHelp();
         }
         else if(params.containsKey("libraryEnabled")) {
-            librarySystem = new LibrarySystem();
+            if(config.isPollingEnabled()) {
+                library.startPolling();
+            }
         }
         else if(params.containsKey("telegramBot")) {
-            telegramBot = Telegram.getInstance();
-            telegramBot.run();
+            try {
+                telegramBot = new Bot();
+                telegramBot.start();
+            } catch (InterruptedException e) {
+                GrabberUtils.err(e.getMessage());
+                e.printStackTrace();
+            }
         }
         else {
             if(!params.get("link").get(0).isEmpty()) {
-                CLI.downloadNovel(params);
+                try {
+                    CLI.downloadNovel(params);
+                } catch (ClassNotFoundException | InterruptedException e) {
+                    GrabberUtils.err(e.getMessage());
+                } catch (IOException e) {
+                    GrabberUtils.err(e.getMessage(), e);
+                }
             } else {
                 GrabberUtils.err("No novel link.");
             }
@@ -62,9 +87,24 @@ public class init {
             try {
                 System.setProperty("awt.useSystemAAFontSettings","on");
                 System.setProperty("swing.aatext", "true");
-                UIManager.setLookAndFeel(new FlatIntelliJLaf());
-                setUIFont (new javax.swing.plaf.FontUIResource("Tahoma",Font.PLAIN,12));
+                switch (config.getGuiTheme()) {
+                    case 0:
+                        UIManager.setLookAndFeel(new FlatIntelliJLaf());
+                        break;
+                    case 1:
+                        UIManager.setLookAndFeel(new FlatLightLaf());
+                        break;
+                    case 2:
+                        UIManager.setLookAndFeel(new FlatDarkLaf());
+                        break;
+                    case 3:
+                        UIManager.setLookAndFeel(new FlatDarculaLaf());
+                        break;
+                }
+                GrabberUtils.loadFontsFromFolder();
+                setUIFont (new javax.swing.plaf.FontUIResource(config.getFontName(), Font.PLAIN,13));
                 gui = new GUI();
+                gui.pack();
                 gui.setLocationRelativeTo(null);
                 gui.setVisible(true);
             } catch (Exception e) {
@@ -91,15 +131,14 @@ public class init {
                 "  [-displayTitle]\t\t\t\tWrite the chapter title at the top of each chapter text.\n" +
                 "  [-invertOrder]\t\t\t\tInvert the chapter order.\n" +
                 "  [-noDesc]\t\t\t\t\tDon't create a description page.\n" +
-                "  [-autoGetImages]\t\t\t\t\tGrab images from chapter.\n" +
-                "  [-removeStyle]\t\t\t\tRemove css styling from chapter.\n" +
+                "  [-getImages]\t\t\t\t\tGrab images from chapter.\n" +
                 "  \n" +
                 "Examples:\n" +
                 "java -jar Novel-Grabber.jar -link https://myhost.com/novel/a-novel\n" +
-                "java -jar Novel-Grabber.jar -link https://myhost.com/novel/a-novel -chapters 5 last -displayTitle -wait 3000\n" +
-                "java -jar Novel-Grabber.jar -link https://myhost.com/novel/a-novel -path /home/flameish/novels -account flameish kovzhvwlmzgv");
+                "java -jar Novel-Grabber.jar -link https://myhost.com/novel/a-novel -chapters 5 last -displayTitle -wait 3000");
     }
 
+    // Set font for each swing element
     public static void setUIFont(javax.swing.plaf.FontUIResource f){
         java.util.Enumeration keys = UIManager.getDefaults().keys();
         while (keys.hasMoreElements()) {

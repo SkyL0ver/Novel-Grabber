@@ -3,6 +3,7 @@ package grabber;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.safety.Whitelist;
+import system.Config;
 import system.init;
 import org.jsoup.nodes.Element;
 
@@ -11,9 +12,10 @@ import java.io.Serializable;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.UUID;
 
 public class Chapter implements Serializable {
-    private static int chapterId = 0;  // Used to set unique filenames
+    public static int chapterCounter = 0;  // Used to set unique filenames
     public Element chapterContainer;
     public String chapterContent;
     public String name;
@@ -22,9 +24,9 @@ public class Chapter implements Serializable {
     public int status = 0; // 0 = not downloaded, 1 = successfully downloaded, 2 = failed download
 
     public Chapter(String name, String link) {
-        this.name = name;
+        this.name = name.trim();
         this.chapterURL = link;
-        fileName = String.format("%05d", ++chapterId) + "-" + name.replaceAll("[^\\w]+", "-");
+        fileName = String.format("%05d", ++chapterCounter) + "-" + this.name.replaceAll("[^\\w]+", "-");
     }
 
     /**
@@ -33,7 +35,6 @@ public class Chapter implements Serializable {
      * Downloads images if selected.
      * Cleans broken HTML
      * Updates page count on GUI.
-     * Adds html header/footer to chapter text.
      */
     public void saveChapter(Novel novel) {
         chapterContainer = novel.source.getChapterContent(this);
@@ -43,7 +44,7 @@ public class Chapter implements Serializable {
             return;
         }
 
-        removeUnwantedTags(novel.removeStyling, novel.blacklistedTags);
+        removeUnwantedTags(novel.blacklistedTags);
 
         if (novel.getImages) {
             getImages(novel.window, novel.images);
@@ -52,27 +53,30 @@ public class Chapter implements Serializable {
             chapterContainer.select("img").remove();
         }
 
+        if(novel.displayChapterTitle) addTitle();
+        cleanHTMLContent();
+        // Update word count on GUI
         novel.wordCount = novel.wordCount + GrabberUtils.getWordCount(chapterContainer.toString());
         GrabberUtils.info(novel.window,  "Saved chapter: "+ name);
         if(init.gui != null) {
             init.gui.updatePageCount(novel.window, novel.wordCount);
         }
 
-        chapterContent = cleanContent(chapterContainer, novel.displayChapterTitle);
         chapterContainer = null;
         status = 1; // Chapter was successfully downloaded
+
     }
 
     /**
      * Removes general and specified blacklisted tags from chapter body.
      */
-    private void removeUnwantedTags(boolean removeStyling, List<String> blacklistedTags) {
+    private void removeUnwantedTags(List<String> blacklistedTags) {
         // Remove user set blacklisted tags
         for (String tag : blacklistedTags) {
             chapterContainer.select(tag).remove();
         }
         // Remove empty block elements
-        for (Element element : chapterContainer.select("*")) {
+        for (Element element : chapterContainer.select("*:not(:has(img))")) {
             if (!element.hasText() && element.isBlock()) {
                 element.remove();
             }
@@ -82,14 +86,10 @@ public class Chapter implements Serializable {
         for(Element link: chapterContainer.select("a[href]")) {
             if(Arrays.stream(blacklistedWords).anyMatch(link.text().toLowerCase()::contains)) link.remove();
         }
-        if (removeStyling) {
-            chapterContainer.select("[style]").removeAttr("style");
-        }
     }
 
-
     /**
-     * Saves images with filenames in HashMap
+     * Saves images with filenames in HashMap and points img src to local file
      */
     private void getImages(String window, HashMap<String, BufferedImage> images) {
         for (Element image : chapterContainer.select("img")) {
@@ -97,7 +97,11 @@ public class Chapter implements Serializable {
             String imageFilename = GrabberUtils.getFilenameFromUrl(imageURL);
             BufferedImage bufferedImage = GrabberUtils.getImage(imageURL);
 
-            if(imageFilename != null && bufferedImage != null) {
+            if(bufferedImage != null) {
+                // Sometimes image names can be empty. Create random name for it then.
+                if (imageFilename == null || imageFilename.isEmpty()) {
+                    imageFilename = UUID.randomUUID().toString();
+                }
                 // Check if image has file extension. If not set as png.
                 if(GrabberUtils.getFileExtension(imageFilename) == null) imageFilename += ".png";
                 // Modify href of image src to downloaded image
@@ -114,26 +118,36 @@ public class Chapter implements Serializable {
     }
 
     /**
-     * Cleans HTML tags and adds chapter title optionally
+     * Cleans chapter HTML to
      */
-    private String cleanContent(Element chapterContainer, boolean displayChapterTitle) {
-        String chapterString = chapterContainer.toString();
-
+    private void cleanHTMLContent() {
         Document.OutputSettings settings = new Document.OutputSettings();
         settings.syntax(Document.OutputSettings.Syntax.xml);
         settings.escapeMode(org.jsoup.nodes.Entities.EscapeMode.xhtml);
         settings.charset("UTF-8");
-
-        chapterString = Jsoup.clean(
-                chapterString,
+        chapterContent = Jsoup.clean(chapterContainer.toString(),
                 "http://"+GrabberUtils.getDomainName(chapterURL),
                 Whitelist.relaxed().preserveRelativeLinks(true),
                 settings);
+    }
 
-        if(displayChapterTitle) {
-            chapterString = "<span style=\"font-weight: 700; text-decoration: underline;\">" + name + "</span>" + EPUB.NL + chapterString;
+    /**
+     * Adds the chapter title on top of chapter body according to format setting
+     */
+    private void addTitle() {
+        Config config = Config.getInstance();
+        String chapterTitle;
+        switch (config.getChapterTitleFormat()) {
+            case 1:
+                chapterTitle = "<h1>" + name + "</h1>\n";
+                break;
+            case 2: // Custom
+                chapterTitle = String.format(config.getChapterTitleTemplate() + "\n", name);
+                break;
+            default:
+                chapterTitle = "<span><b><u>" + name + "</u></b></span>\n";
         }
-        return chapterString;
+        chapterContainer.child(0).before(chapterTitle);
     }
 
     @Override

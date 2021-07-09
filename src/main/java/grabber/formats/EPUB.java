@@ -1,12 +1,18 @@
-package grabber;
-import system.data.Settings;
+package grabber.formats;
+import grabber.Chapter;
+import grabber.GrabberUtils;
+import grabber.Novel;
+import grabber.NovelMetadata;
+import nl.siegmann.epublib.epub.EpubReader;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import system.Config;
 
 import nl.siegmann.epublib.domain.Author;
 import nl.siegmann.epublib.domain.Book;
 import nl.siegmann.epublib.domain.Metadata;
 import nl.siegmann.epublib.domain.Resource;
 import nl.siegmann.epublib.epub.EpubWriter;
-import system.init;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -30,27 +36,42 @@ public class EPUB {
             "</head>" + NL +
             "<body>" + NL;
     static final String htmlFoot = "</body>" + NL + "</html>";
-    private final Novel novel;
+    private Novel novel;
     private final NovelMetadata novelMetadata;
-    private final Book book;
+    private Book book;
 
     public EPUB(Novel novel) {
         this.novel = novel;
         this.novelMetadata = novel.metadata;
-        book = new Book();
-        try {
-            book.getResources().add(new Resource(getClass().getResourceAsStream("/default.css"), "default.css"));
-        } catch (IOException e) {
-            GrabberUtils.err(novel.window, "Could not add default.css file to EPUB. "+e.getMessage(), e);
+        // Library novels try to update existing files
+        if (novel.window.equals("checker")) {
+            try {
+                book = tryReadOldFile();
+            } catch (FileNotFoundException e) {
+                GrabberUtils.err("Could not find old book file: " + e.getMessage());
+            } catch (IOException e) {
+                GrabberUtils.err("Could not access old book file: " + e.getMessage());
+            }
+        }
+        if (book == null) {
+            book = new Book();
+            try {
+                book.getResources().add(new Resource(getClass().getResourceAsStream("/default.css"), "default.css"));
+            } catch (IOException e) {
+                GrabberUtils.err(novel.window, "Could not add default.css file to EPUB. " + e.getMessage());
+            }
         }
     }
 
-    public void writeEpub() {
+    public void write() {
         // Order is important
         addMetadata();
         addCover();
-        addToc();
-        if(!novel.noDescription && !novelMetadata.getDescription().isEmpty()) addDesc();
+        // Not re-adding for existing epubs
+        if (!novel.window.equals("checker")) {
+            addToc();
+            if(!novel.noDescription && !novelMetadata.getDescription().isEmpty()) addDesc();
+        }
         if (novel.getImages) addImages();
         addChapters();
 
@@ -58,14 +79,25 @@ public class EPUB {
         GrabberUtils.createDir(novel.saveLocation);
 
         try {
+            GrabberUtils.info(novel.window,"Writing EPUB...");
             EpubWriter epubWriter = new EpubWriter();
             epubWriter.write(book, new FileOutputStream(novel.saveLocation + "/" + epubFilename));
+            novel.filename = epubFilename;
+            GrabberUtils.info(novel.window, "Output: " + novel.saveLocation+"/"+ epubFilename);
         } catch (IOException e) {
-            GrabberUtils.err(novel.window, "Could not write EPUB. "+e.getMessage(), e);
+            GrabberUtils.err(novel.window, "Could not write EPUB. " + e.getMessage(), e);
         }
-        novel.epubFilename = epubFilename;
-        GrabberUtils.info("Output: " + novel.saveLocation+"/"+ epubFilename);
     }
+
+    /**
+     * Tries to read old EPUB file from save location.
+     */
+    public Book tryReadOldFile() throws IOException {
+        File epubFile = new File(novel.saveLocation + "/" + setFilename());
+        InputStream inputStream = new FileInputStream(epubFile);
+        return new EpubReader().readEpub(inputStream, "UTF-8");
+    }
+
 
     private void addImages() {
         for (Map.Entry<String, BufferedImage> entry : novel.images.entrySet()) {
@@ -98,21 +130,15 @@ public class EPUB {
 
     private String setFilename() {
         String epubFilename = "Unknown.epub";
-        switch (Settings.getInstance().getFilenameFormat()) {
+        switch (Config.getInstance().getFilenameFormat()) {
             case 0:
                 epubFilename = novelMetadata.getAuthor() + " - " + novelMetadata.getTitle() + ".epub";
-                if(novel.window.equals("checker")) epubFilename =
-                        novel.firstChapter + "-"+ novel.lastChapter+"-"+epubFilename.replaceAll(" ","-");
                 break;
             case 1:
                 epubFilename = novelMetadata.getTitle() + " - " + novelMetadata.getAuthor() + ".epub";
-                if(novel.window.equals("checker")) epubFilename =
-                        novel.firstChapter + "-"+ novel.lastChapter+"-"+epubFilename.replaceAll(" ","-");
                 break;
             case 2:
                 epubFilename = novelMetadata.getTitle() + ".epub";
-                if(novel.window.equals("checker")) epubFilename =
-                        novel.firstChapter + "-"+ novel.lastChapter+"-"+epubFilename.replaceAll(" ","-");
                 break;
         }
         return epubFilename.replaceAll("[\\\\/:*?\"<>|]", "");
@@ -143,18 +169,28 @@ public class EPUB {
     }
 
     public void addToc() {
-        StringBuilder tocString = new StringBuilder(htmlHead + "<b>Table of Contents</b>" + NL + "<p style=\"text-indent:0pt\">" + NL);
+        StringBuilder tocBuilder = new StringBuilder(htmlHead + NL +
+                "<b>Table of Contents</b>" + NL +
+                "<p style=\"text-indent:0pt\">" + NL);
         for (Chapter chapter: novel.chapterList) {
             if(chapter.status == 1)
-               tocString.append("<a href=\"").append(chapter.fileName).append(".html\">").append(chapter.name).append("</a><br/>").append(NL);
+                tocBuilder.append("<a href=\"").append(chapter.fileName).append(".html\">").append(chapter.name).append("</a><br/>").append(NL);
         }
-        tocString.append("</p>").append(NL).append(htmlFoot);
+        tocBuilder.append("</p>").append(NL).append(htmlFoot);
 
-        try (InputStream inputStream = new ByteArrayInputStream(tocString.toString().getBytes(StandardCharsets.UTF_8))) {
+        Document.OutputSettings settings = new Document.OutputSettings();
+        settings.syntax(Document.OutputSettings.Syntax.xml);
+        settings.escapeMode(org.jsoup.nodes.Entities.EscapeMode.xhtml);
+        settings.charset("UTF-8");
+
+        Document doc = Jsoup.parse(tocBuilder.toString());
+        doc.outputSettings(settings);
+
+        try (InputStream inputStream = new ByteArrayInputStream(doc.html().getBytes(StandardCharsets.UTF_8))) {
             Resource resource = new Resource(inputStream, "table_of_contents.html");
             book.addSection("Table of Contents", resource);
         } catch (IOException e) {
-            GrabberUtils.err(novel.window, "Could not add table of content to EPUB. "+e.getMessage(), e);
+            GrabberUtils.err(novel.window, "Could not add table of content to EPUB. " + e.getMessage(), e);
         }
     }
 
@@ -164,7 +200,16 @@ public class EPUB {
                 "<p>" + novelMetadata.getDescription() + "</p>" + NL +
                 "</div>" + NL +
                 htmlFoot;
-        try (InputStream inputStream = new ByteArrayInputStream(descString.getBytes(StandardCharsets.UTF_8))) {
+
+        Document.OutputSettings settings = new Document.OutputSettings();
+        settings.syntax(Document.OutputSettings.Syntax.xml);
+        settings.escapeMode(org.jsoup.nodes.Entities.EscapeMode.xhtml);
+        settings.charset("UTF-8");
+
+        Document doc = Jsoup.parse(descString);
+        doc.outputSettings(settings);
+
+        try (InputStream inputStream = new ByteArrayInputStream(doc.html().getBytes(StandardCharsets.UTF_8))) {
             Resource resource = new Resource(inputStream, "desc_Page.html");
             book.addSection("Description", resource);
         } catch (IOException e) {

@@ -6,21 +6,40 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
-import org.openqa.selenium.By;
-import org.openqa.selenium.support.ui.ExpectedConditions;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 public class wuxiaworld_site implements Source {
-    private final Novel novel;
+    private final String name = "WuxiaWorld.site";
+    private final String url = "https://wuxiaworld.site";
+    private final boolean canHeadless = false;
+    private Novel novel;
     private Document toc;
 
     public wuxiaworld_site(Novel novel) {
         this.novel = novel;
+    }
+
+    public wuxiaworld_site() {
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public boolean canHeadless() {
+        return canHeadless;
+    }
+
+    public String toString() {
+        return name;
+    }
+
+    public String getUrl() {
+        return url;
     }
 
     public List<Chapter> getChapterList() {
@@ -38,18 +57,10 @@ public class wuxiaworld_site implements Source {
             GrabberUtils.err(novel.window, GrabberUtils.getHTMLErrMsg(httpEr));
         } catch (IOException e) {
             GrabberUtils.err(novel.window, "Could not connect to webpage!", e);
+        } catch (NullPointerException e) {
+            GrabberUtils.err(novel.window, "Could not find expected selectors. Correct novel link?", e);
         }
         return chapterList;
-    }
-
-    private Document getTocHeadless() {
-        if (novel.headlessDriver == null) novel.headlessDriver = new Driver(novel.window, novel.browser);
-        novel.headlessDriver.driver.navigate().to(novel.novelLink);
-        novel.headlessDriver.wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector(".listing-chapters_wrap a")));
-        String baseUrl = novel.headlessDriver.driver.getCurrentUrl().substring(0, GrabberUtils.ordinalIndexOf(novel.headlessDriver.driver.getCurrentUrl(), "/", 3) + 1);
-        Document toc = Jsoup.parse(novel.headlessDriver.driver.getPageSource(), baseUrl);
-        novel.headlessDriver.driver.close();
-        return toc;
     }
 
     public Element getChapterContent(Chapter chapter) {
@@ -93,10 +104,6 @@ public class wuxiaworld_site implements Source {
         List blacklistedTags = new ArrayList();
         blacklistedTags.add("ad");
         return blacklistedTags;
-    }
-
-    public Map<String, String> getLoginCookies() throws UnsupportedOperationException {
-        throw new UnsupportedOperationException();
     }
 
 }
