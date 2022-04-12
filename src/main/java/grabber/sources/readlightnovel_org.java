@@ -13,14 +13,35 @@ import org.jsoup.select.Elements;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 public class readlightnovel_org implements Source {
-    private final Novel novel;
+    private final String name = "ReadLightNovel";
+    private final String url = "https://www.readlightnovel.org/";
+    private final boolean canHeadless = false;
+    private Novel novel;
     private Document toc;
 
     public readlightnovel_org(Novel novel) {
         this.novel = novel;
+    }
+
+    public readlightnovel_org() {
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public boolean canHeadless() {
+        return canHeadless;
+    }
+
+    public String toString() {
+        return name;
+    }
+
+    public String getUrl() {
+        return url;
     }
 
     public List<Chapter> getChapterList() {
@@ -33,8 +54,12 @@ public class readlightnovel_org implements Source {
             for (Element chapterLink : chapterLinks) {
                 chapterList.add(new Chapter(chapterLink.text(), chapterLink.attr("abs:href")));
             }
+        } catch (HttpStatusException httpEr) {
+            GrabberUtils.err(novel.window, GrabberUtils.getHTMLErrMsg(httpEr));
         } catch (IOException e) {
-            GrabberUtils.err(e.getMessage(), e);
+            GrabberUtils.err(novel.window, "Could not connect to webpage!", e);
+        } catch (NullPointerException e) {
+            GrabberUtils.err(novel.window, "Could not find expected selectors. Correct novel link?", e);
         }
         return chapterList;
     }
@@ -77,11 +102,9 @@ public class readlightnovel_org implements Source {
     public List<String> getBlacklistedTags() {
         List blacklistedTags = new ArrayList();
         blacklistedTags.add(".apester-media");
+        blacklistedTags.add("#growfoodsmart");
+        blacklistedTags.add(".ads-title");
         return blacklistedTags;
-    }
-
-    public Map<String, String> getLoginCookies() throws UnsupportedOperationException {
-        throw new UnsupportedOperationException();
     }
 
 }

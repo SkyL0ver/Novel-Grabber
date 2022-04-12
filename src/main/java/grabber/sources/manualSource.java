@@ -11,6 +11,7 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.openqa.selenium.By;
+import org.openqa.selenium.Cookie;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import system.init;
@@ -18,12 +19,17 @@ import system.init;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 public class manualSource implements Source {
-    private final String chapterContainer;
-    private final Novel novel;
+    private final String name = "Manual";
+    private final String url = "https://google.com/";
+    private final boolean canHeadless = false;
+    private String chapterContainer;
+    private Novel novel;
+
+    public manualSource() {
+    }
 
     public manualSource(Novel novel) {
         this.novel = novel;
@@ -33,6 +39,22 @@ public class manualSource implements Source {
     /**
      * Retrieves all links containing a href tag and displays them on the GUI.
      */
+    public String getName() {
+        return name;
+    }
+
+    public boolean canHeadless() {
+        return canHeadless;
+    }
+
+    public String toString() {
+        return name;
+    }
+
+    public String getUrl() {
+        return url;
+    }
+
     public List<Chapter> getChapterList() {
         init.gui.appendText("manual", "Retrieving links from: " + novel.novelLink);
         if (novel.useHeadless) {
@@ -57,18 +79,21 @@ public class manualSource implements Source {
     }
 
     private Document getTocHeadless() {
-        if (novel.headlessDriver == null) novel.headlessDriver = new Driver(novel.window, novel.browser);
+        if (novel.headlessDriver == null) novel.headlessDriver = new Driver(novel.window);
+        novel.headlessDriver.driver.navigate().to(novel.novelLink);
+        novel.cookies.forEach((key, value) -> novel.headlessDriver.driver.manage().addCookie(new Cookie(key, value)));
         novel.headlessDriver.driver.navigate().to(novel.novelLink);
         novel.headlessDriver.driver.manage().timeouts().implicitlyWait(15, TimeUnit.SECONDS);
         String baseUrl = novel.headlessDriver.driver.getCurrentUrl().substring(0, GrabberUtils.ordinalIndexOf(novel.headlessDriver.driver.getCurrentUrl(), "/", 3) + 1);
         Document toc = Jsoup.parse(novel.headlessDriver.driver.getPageSource(), baseUrl);
         novel.headlessDriver.driver.close();
+        novel.headlessDriver = null;
         return toc;
     }
 
     private Document getTocStatic() {
         try {
-            return Jsoup.connect(novel.novelLink)
+            return Jsoup.connect(novel.novelLink).cookies(novel.cookies)
                     .userAgent("Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:83.0) Gecko/20100101 Firefox/83.0")
                     .get();
         } catch (HttpStatusException httpEr) {
@@ -86,7 +111,7 @@ public class manualSource implements Source {
             if (novel.useHeadless) {
                 doc = getPageHeadless(chapter);
             } else {
-                doc = Jsoup.connect(chapter.chapterURL)
+                doc = Jsoup.connect(chapter.chapterURL).cookies(novel.cookies)
                         .userAgent("Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:83.0) Gecko/20100101 Firefox/83.0")
                         .get();
             }
@@ -105,8 +130,7 @@ public class manualSource implements Source {
         } catch (IOException e) {
             GrabberUtils.err(novel.window, "Could not connect to webpage!", e);
         } catch (NullPointerException e) {
-            GrabberUtils.err(novel.window, "Could not detect chapter on: "
-                    + chapter.chapterURL + "(" + e.getMessage() + ")", e);
+            GrabberUtils.err(novel.window, "Could not detect chapter on: " + chapter.chapterURL);
         }
         return chapterBody;
     }
@@ -118,9 +142,9 @@ public class manualSource implements Source {
     }
 
     private Document getPageHeadless(Chapter chapter) {
-        if (novel.headlessDriver == null) {
-            novel.headlessDriver = new Driver(novel.window, novel.browser);
-        }
+        if (novel.headlessDriver == null) novel.headlessDriver = new Driver(novel.window);
+        novel.headlessDriver.driver.navigate().to(chapter.chapterURL);
+        novel.cookies.forEach((key, value) -> novel.headlessDriver.driver.manage().addCookie(new Cookie(key, value)));
         novel.headlessDriver.driver.navigate().to(chapter.chapterURL);
         if (chapterContainer.isEmpty()) { // Wait 5 seconds for everything to finish loading
             novel.headlessDriver.driver.manage().timeouts().implicitlyWait(15, TimeUnit.SECONDS);
@@ -144,8 +168,4 @@ public class manualSource implements Source {
         return blacklistedTags;
     }
 
-    // Dummy
-    public Map<String, String> getLoginCookies() throws UnsupportedOperationException {
-        throw new UnsupportedOperationException();
-    }
 }
